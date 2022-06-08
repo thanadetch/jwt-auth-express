@@ -32,25 +32,30 @@ const signin = async (req, res) => {
 }
 
 const regenerateToken = async (req, res) => {
-    const {refreshToken} = req.body;
-    if (refreshToken == null) {
-        return res.status(403).json({message: "Refresh Token is required!"});
-    }
+    try {
+        const {refreshToken} = req.body;
+        if (refreshToken == null) throw new Error("Refresh Token is required!")
 
-    let result = await RefreshToken.findOne({token: refreshToken}).populate({
-        path: 'user', populate: [{path: 'roles'},]
-    });
-    if (!result) {
-        res.status(403).json({message: "Refresh token is not in database!"});
-        return;
-    }
-    const accessToken = await jwt.sign(result._doc.user._doc, process.env.ACCESS_TOKEN_SECRET, {
-        expiresIn: '15min'
-    });
+        let result = await RefreshToken.findOne({token: refreshToken}).populate({
+            path: 'user', populate: [{path: 'roles'},]
+        });
+        if (!result) throw new Error("Refresh token is not in database!")
 
-    return res.status(200).json({
-        accessToken, refreshToken: result._doc.token,
-    });
+        try {
+            jwt.verify(result._doc.token, process.env.REFRESH_TOKEN_SECRET)
+        } catch (err) {
+            await RefreshToken.findByIdAndRemove(result._id, {useFindAndModify: false});
+            throw new Error("Refresh token was expired. Please make a new signin request")
+        }
+
+        const accessToken = await jwt.sign(result._doc.user._doc, process.env.ACCESS_TOKEN_SECRET, {
+            expiresIn: '15min'
+        });
+
+        res.status(200).json({accessToken, refreshToken: result._doc.token});
+    } catch (e) {
+        res.status(403).json({message: e.message});
+    }
 }
 
 export {
